@@ -1,0 +1,5 @@
+{
+  "from": "client@example.com",
+  "subject": "Contract renewal — response needed by Friday",
+  "body": "Hi, we need confirmation on the contract renewal before end of business Friday or we will have to proceed with another vendor. Please advise urgently."
+}

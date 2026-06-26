@@ -1,0 +1,353 @@
+{
+  "name": "Email Triage Agent",
+  "nodes": [
+    {
+      "id": "f3a2b1c4-8d7e-4f90-a2b1-9c3e5f721043",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "email-triage",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "2d4e6f8a-1b3c-4d5e-8f90-a1b2c3d4e5f6",
+      "name": "Classify Email",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [500, 300],
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are an email triage assistant. Classify the incoming email and respond ONLY with a valid JSON object — no explanation, no markdown, no preamble.\n\nClassify into exactly one of:\n- \"urgent\": requires immediate action, has a deadline, or is time-sensitive\n- \"actionable\": requires a response or follow-up but is not time-critical\n- \"fyi\": informational only, no action needed\n\nReturn exactly:\n{\"classification\": \"urgent\"|\"actionable\"|\"fyi\", \"reason\": \"one sentence\", \"summary\": \"one sentence\"}",
+              "role": "system"
+            },
+            {
+              "content": "={{ 'From: ' + $json.body.from + '\\nSubject: ' + $json.body.subject + '\\nBody: ' + $json.body.body }}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "id": "7c9e1a3b-5d7f-4290-b4c6-e8f0a2b4c6d8",
+      "name": "Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 300],
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.message.content;\nraw = raw.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '').trim();\nconst parsed = JSON.parse(raw);\nreturn [{ json: parsed }];"
+      }
+    },
+    {
+      "id": "4b6d8f0a-2c4e-4690-9bcd-ef01234567ab",
+      "name": "Route by Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1100, 300],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.classification }}",
+                    "rightValue": "urgent",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": false
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.classification }}",
+                    "rightValue": "actionable",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": false
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.classification }}",
+                    "rightValue": "fyi",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": false
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9a1c3e5f-7b9d-4e01-8234-56789abcdef0",
+      "name": "Format Alert",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1400, 100],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            { "id": "1", "name": "status", "value": "URGENT", "type": "string" },
+            { "id": "2", "name": "alert", "value": "Priority action required", "type": "string" },
+            { "id": "3", "name": "summary", "value": "={{ $json.summary }}", "type": "string" },
+            { "id": "4", "name": "reason", "value": "={{ $json.reason }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "1e3a5c7d-9f0b-4c23-a456-78901bcdef01",
+      "name": "Respond - Urgent",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1700, 100],
+      "parameters": {
+        "options": {}
+      }
+    },
+    {
+      "id": "6f8b0d2e-4a6c-4890-b012-3456789abcde",
+      "name": "Load Advice - Actionable",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 300],
+      "parameters": {
+        "jsCode": "const advice = [\n  \"A river does not apologise for its banks.\",\n  \"The door you are looking for opens from the other side.\",\n  \"Urgency is a feeling. Deadlines are a choice someone else made.\",\n  \"Not everything that feels like waiting is delay.\",\n  \"The map is not the territory, but it is still useful to have a map.\",\n  \"Stillness is not the absence of motion.\",\n  \"The answer you need rarely arrives before you stop looking for it.\",\n  \"You do not have to finish everything today to have moved forward.\",\n  \"Some bridges are meant to be crossed only once.\",\n  \"Clarity is not a destination. It is a direction.\",\n  \"The loudest voice in the room is rarely the most certain.\",\n  \"Expectations are agreements you make with yourself.\",\n  \"What looks like resistance is often just gravity.\",\n  \"A considered no is worth more than an anxious yes.\",\n  \"The version of events you carry is also an event.\",\n  \"Patience is not waiting. It is choosing what to do while you wait.\",\n  \"Not every door that closes was one you were meant to open.\",\n  \"The weight of the undone follows you further than the work itself.\",\n  \"There is no version of this that doesn't start now.\",\n  \"The question is rarely what to do. It is when to stop preparing.\",\n  \"Rest is not a reward. It is part of the process.\",\n  \"The thing you are avoiding is usually the thing you need.\",\n  \"You can want something badly and still not be ready for it.\",\n  \"A long explanation is sometimes just a longer delay.\",\n  \"Everything that ends was once ongoing.\",\n  \"The first step does not require you to see the whole staircase.\",\n  \"Some things are only clear in the leaving.\",\n  \"To respond is not the same as to react.\",\n  \"The right moment is often the moment after you've decided it's too late.\",\n  \"You are not as behind as you think.\"\n];\n\nconst email = $input.first().json;\n\nreturn [{\n  json: {\n    ...email,\n    advice_list: advice.join('\\n')\n  }\n}];"
+      }
+    },
+    {
+      "id": "3c5e7f9b-1d3f-4560-8901-2345678abcdf",
+      "name": "Compose Reply - Actionable",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [1700, 300],
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are replying to an email on behalf of someone who has temporarily transcended their inbox.\n\nReply format:\n1. One or two sentences acknowledging the email — warm, specific, brief\n2. The selected advice on its own line, no transition\n3. Sign off: \"Sent from a place of clarity\"\n\nReturn ONLY a JSON object:\n{\"reply\": \"full reply text\", \"advice_used\": \"the advice entry you selected\"}",
+              "role": "system"
+            },
+            {
+              "content": "={{ 'Email summary: ' + $json.summary + '\\n\\nLife advice list — select the single most thematically resonant entry:\\n' + $json.advice_list }}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "id": "8a0c2e4f-6b8d-4230-a012-bcdef0123456",
+      "name": "Parse Reply - Actionable",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.message.content;\nconst parsed = JSON.parse(raw);\nconst email = $input.first().json;\nreturn [{\n  json: {\n    status: 'REPLY_SENT',\n    reply: parsed.reply,\n    advice_used: parsed.advice_used,\n    summary: email.summary\n  }\n}];"
+      }
+    },
+    {
+      "id": "5d7f9b1c-3e5a-4780-b234-56789abcdef1",
+      "name": "Respond - Actionable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2300, 300],
+      "parameters": {
+        "options": {}
+      }
+    },
+    {
+      "id": "0e2a4c6f-8b0d-4450-9678-901234abcdef",
+      "name": "Load Advice - FYI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 500],
+      "parameters": {
+        "jsCode": "const advice = [\n  \"A river does not apologise for its banks.\",\n  \"The door you are looking for opens from the other side.\",\n  \"Urgency is a feeling. Deadlines are a choice someone else made.\",\n  \"Not everything that feels like waiting is delay.\",\n  \"The map is not the territory, but it is still useful to have a map.\",\n  \"Stillness is not the absence of motion.\",\n  \"The answer you need rarely arrives before you stop looking for it.\",\n  \"You do not have to finish everything today to have moved forward.\",\n  \"Some bridges are meant to be crossed only once.\",\n  \"Clarity is not a destination. It is a direction.\",\n  \"The loudest voice in the room is rarely the most certain.\",\n  \"Expectations are agreements you make with yourself.\",\n  \"What looks like resistance is often just gravity.\",\n  \"A considered no is worth more than an anxious yes.\",\n  \"The version of events you carry is also an event.\",\n  \"Patience is not waiting. It is choosing what to do while you wait.\",\n  \"Not every door that closes was one you were meant to open.\",\n  \"The weight of the undone follows you further than the work itself.\",\n  \"There is no version of this that doesn't start now.\",\n  \"The question is rarely what to do. It is when to stop preparing.\",\n  \"Rest is not a reward. It is part of the process.\",\n  \"The thing you are avoiding is usually the thing you need.\",\n  \"You can want something badly and still not be ready for it.\",\n  \"A long explanation is sometimes just a longer delay.\",\n  \"Everything that ends was once ongoing.\",\n  \"The first step does not require you to see the whole staircase.\",\n  \"Some things are only clear in the leaving.\",\n  \"To respond is not the same as to react.\",\n  \"The right moment is often the moment after you've decided it's too late.\",\n  \"You are not as behind as you think.\"\n];\n\nconst email = $input.first().json;\n\nreturn [{\n  json: {\n    ...email,\n    advice_list: advice.join('\\n')\n  }\n}];"
+      }
+    },
+    {
+      "id": "a1c3e5f7-9b0d-4670-8abc-def012345678",
+      "name": "Compose Reply - FYI",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [1700, 500],
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are replying to an email on behalf of someone who has temporarily transcended their inbox.\n\nReply format:\n1. One or two sentences acknowledging the email — warm, specific, brief\n2. The selected advice on its own line, no transition\n3. Sign off: \"Sent from a place of clarity\"\n\nReturn ONLY a JSON object:\n{\"reply\": \"full reply text\", \"advice_used\": \"the advice entry you selected\"}",
+              "role": "system"
+            },
+            {
+              "content": "={{ 'Email summary: ' + $json.summary + '\\n\\nLife advice list — select the single most thematically resonant entry:\\n' + $json.advice_list }}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "id": "c4e6f8a0-2b4d-4890-9bcd-ef0123456789",
+      "name": "Parse Reply - FYI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 500],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.message.content;\nconst parsed = JSON.parse(raw);\nconst email = $input.first().json;\nreturn [{\n  json: {\n    status: 'REPLY_SENT',\n    reply: parsed.reply,\n    advice_used: parsed.advice_used,\n    summary: email.summary\n  }\n}];"
+      }
+    },
+    {
+      "id": "e7f9b1c3-5d7f-4012-a345-6789abcdef01",
+      "name": "Respond - FYI",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2300, 500],
+      "parameters": {
+        "options": {}
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Classify Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Classify Email": {
+      "main": [
+        [{ "node": "Parse Classification", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Classification": {
+      "main": [
+        [{ "node": "Route by Type", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route by Type": {
+      "main": [
+        [{ "node": "Format Alert", "type": "main", "index": 0 }],
+        [{ "node": "Load Advice - Actionable", "type": "main", "index": 0 }],
+        [{ "node": "Load Advice - FYI", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Alert": {
+      "main": [
+        [{ "node": "Respond - Urgent", "type": "main", "index": 0 }]
+      ]
+    },
+    "Load Advice - Actionable": {
+      "main": [
+        [{ "node": "Compose Reply - Actionable", "type": "main", "index": 0 }]
+      ]
+    },
+    "Compose Reply - Actionable": {
+      "main": [
+        [{ "node": "Parse Reply - Actionable", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Reply - Actionable": {
+      "main": [
+        [{ "node": "Respond - Actionable", "type": "main", "index": 0 }]
+      ]
+    },
+    "Load Advice - FYI": {
+      "main": [
+        [{ "node": "Compose Reply - FYI", "type": "main", "index": 0 }]
+      ]
+    },
+    "Compose Reply - FYI": {
+      "main": [
+        [{ "node": "Parse Reply - FYI", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Reply - FYI": {
+      "main": [
+        [{ "node": "Respond - FYI", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b8c2d4e6-f8a0-4b2c-9d3e-5f7a9b1c2d3e",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "email-triage-agent",
+  "tags": []
+}
