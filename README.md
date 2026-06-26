@@ -4,6 +4,8 @@ An intelligent email triage workflow built with [n8n](https://n8n.io/) and OpenA
 
 Built as a portfolio demonstration of LLM-powered workflow automation using n8n.
 
+**Demonstrates:** webhook-triggered LLM classification · structured JSON schema enforcement · classify-then-dispatch routing · two-stage prompt orchestration · self-hosted on Docker via n8n.
+
 ---
 
 ## What It Does
@@ -20,34 +22,45 @@ Replies are returned as webhook responses, designed to be swapped for real sends
 
 ## Architecture
 
+The workflow implements a **classify-then-dispatch pattern**: a language model makes a structured classification decision that determines which downstream branch executes. This is a lightweight form of agentic routing — the LLM controls the flow, not conditional logic applied to hand-coded rules.
+
 ```
-Webhook (POST)
+Webhook Trigger (POST)
      │
      ▼
-OpenAI Chat (gpt-4o-mini)
+OpenAI Message Model (gpt-4o)
   — classifies intent, returns structured JSON
      │
      ▼
-Code Node
-  — parses LLM JSON response
+Code Node — Parse Classification
+  — strips markdown fences, parses JSON response
      │
      ▼
 Switch Node (routes on classification field)
      │
-     ├── "urgent"     → Set Node (priority alert) → Respond to Webhook
+     ├── "urgent"     → Set Node (format alert)   → Respond to Webhook
      │
-     ├── "actionable" → Code Node (select advice) → OpenAI Chat (compose reply) → Respond to Webhook
+     ├── "actionable" → Code Node (load advice)   → OpenAI Message Model (compose reply) → Code Node (parse reply) → Respond to Webhook
      │
-     └── "fyi"        → Code Node (select advice) → OpenAI Chat (compose reply) → Respond to Webhook
+     └── "fyi"        → Code Node (load advice)   → OpenAI Message Model (compose reply) → Code Node (parse reply) → Respond to Webhook
 ```
+
+**Where the JavaScript lives:** Four Code nodes are embedded in `workflow.json`. These handle all data transformation logic:
+- `Parse Classification` — strips LLM markdown fences, JSON-parses the classification response
+- `Load Advice - Actionable` / `Load Advice - FYI` — inlines the advice corpus, joins entries for prompt injection
+- `Parse Reply - Actionable` / `Parse Reply - FYI` — extracts reply and advice fields, shapes the final response object
 
 ### Why structured JSON output from the LLM?
 
 The classification node is prompted to return a fixed JSON schema — `classification`, `reason`, `summary` — rather than free-form text. This means the Switch node routes on a deterministic string value, not on parsed prose. In any LLM-powered automation, the boundary between the model's output and the rest of the system should be a schema, not a string match.
 
+### Why two separate prompts?
+
+The workflow uses two structurally different prompts. The classification prompt enforces a rigid output schema — precision matters more than fluency. The reply prompt is the opposite: open-ended generation with a loose format constraint. Mixing these concerns into a single prompt would degrade both. Keeping them separate also means each can be tuned, swapped, or evaluated independently without touching the other.
+
 ### Why not a vector database for advice selection?
 
-The advice corpus is 20-30 entries. At that scale, passing the full list to the LLM and asking it to select the most thematically resonant entry produces better results than semantic retrieval — the model sees everything in context and makes a more nuanced choice. A vector DB earns its place when the corpus is large enough that stuffing it into a prompt becomes impractical. This isn't that.
+The advice corpus is 30 entries. At that scale, **in-context retrieval** — passing the full corpus as prompt context and letting the model select — produces better results than **semantic retrieval** from a vector store. The model sees everything at once and makes a more nuanced choice. A vector store earns its place when the corpus is large enough that fitting it into a prompt becomes impractical or expensive. At 30 entries, it isn't.
 
 ---
 
